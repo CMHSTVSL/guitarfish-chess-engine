@@ -243,32 +243,73 @@ class Searcher:
         if ply > self.sel_depth:
             self.sel_depth = ply
 
-        stand_pat = self.evaluator.evaluate(board)
-        if stand_pat >= beta:
-            return beta
-        if alpha < stand_pat:
-            alpha = stand_pat
+        in_check = board.is_check()
+        if in_check:
+            moves = board.legal_moves
+            if not moves:
+                return -MATE_VALUE + ply
+            if ply >= MAX_PLY - 1:
+                best_score = -MATE_VALUE
+                for move in moves:
+                    board.push(move)
+                    child_moves = board.legal_moves
+                    if not child_moves:
+                        score = MATE_VALUE - (ply + 1) if board.is_check() else 0
+                    else:
+                        score = -self.evaluator.evaluate(board)
+                    board.pop()
+                    best_score = max(best_score, score)
+                return best_score
+        else:
+            stand_pat = self.evaluator.evaluate(board)
+            if stand_pat >= beta:
+                return beta
+            if alpha < stand_pat:
+                alpha = stand_pat
 
-        if stand_pat < alpha - 900:
-            return alpha
+            if stand_pat < alpha - 900:
+                return alpha
+            if ply >= MAX_PLY - 1 or ply >= 32:
+                return stand_pat
 
-        captures = board.generate_legal_captures()
-        if not captures:
-            return alpha
+            legal_moves = board.legal_moves
+            moves = [
+                move
+                for move in legal_moves
+                if board.is_capture(move) or move.promotion is not None
+            ]
+            if not moves:
+                return 0 if not legal_moves else alpha
+
+        if ply >= 32:
+            best_score = -MATE_VALUE
+            for move in moves:
+                board.push(move)
+                child_moves = board.legal_moves
+                if not child_moves:
+                    score = MATE_VALUE - (ply + 1) if board.is_check() else 0
+                else:
+                    score = -self.evaluator.evaluate(board)
+                board.pop()
+                best_score = max(best_score, score)
+            return best_score
 
         mailbox = self._update_mailbox(board._pieces)
         pieces = board._pieces
 
         scored_captures = []
-        for m in captures:
-            see_val = chess.see(pieces, board.turn, m.from_square, m.to_square)
-            if see_val < 0:
-                continue
+        for move in moves:
+            if not in_check and board.is_capture(move):
+                see_val = chess.see(pieces, board.turn, move.from_square, move.to_square)
+                if see_val < 0:
+                    continue
+            else:
+                see_val = 0
 
-            victim = mailbox[m.to_square] or 1
-            attacker = mailbox[m.from_square] or 1
+            victim = mailbox[move.to_square] or 1
+            attacker = mailbox[move.from_square] or 1
             mvv_lva = PIECE_VALS[victim] * 10 - PIECE_VALS[attacker]
-            scored_captures.append((see_val * 100 + mvv_lva, m))
+            scored_captures.append((see_val * 100 + mvv_lva, move))
 
         if not scored_captures:
             return alpha
@@ -360,6 +401,15 @@ class Searcher:
             improving = False
 
         if (
+            ply > 0
+            and not in_check
+            and depth <= 3
+            and excluded_move is None
+            and static_eval + 342 * depth <= alpha
+        ):
+            return self.quiescence(board, alpha, beta, ply)
+
+        if (
             not in_check
             and depth <= 6
             and abs(beta) < MATE_VALUE - 1000
@@ -402,6 +452,37 @@ class Searcher:
                     return 0
                 if null_score >= beta:
                     return beta
+
+        if (
+            ply > 0
+            and not in_check
+            and depth >= 4
+            and beta < MATE_VALUE - 500
+            and excluded_move is None
+        ):
+            prob_beta = beta + 200
+            for move in board.generate_legal_captures()[:8]:
+                board.push(move)
+                qscore = -self.quiescence(
+                    board, -prob_beta, -prob_beta + 1, ply + 1
+                )
+                score = -MATE_VALUE
+                if not self.stop and qscore >= prob_beta:
+                    score = -self.negamax(
+                        board,
+                        depth - 3,
+                        -prob_beta,
+                        -prob_beta + 1,
+                        ply + 1,
+                        True,
+                        move,
+                        None,
+                    )
+                board.pop()
+                if self.stop:
+                    return 0
+                if score >= prob_beta:
+                    return score - 200
 
         singular_extension = False
         if (
@@ -455,11 +536,72 @@ class Searcher:
             is_cap = (mailbox[move.to_square] != 0) or (
                 move.to_square == board.ep_square
             )
+            see_pruning_candidate = (
+                excluded_move is None
+                and is_cap
+                and not in_check
+                and move.promotion is None
+                and beta == alpha + 1
+                and depth <= 3
+                and moves_searched > 0
+                and not (tt_move == move and singular_extension)
+            )
+            see_passes = not see_pruning_candidate or chess.fast_see(
+                board._pieces,
+                board.turn,
+                move.from_square,
+                move.to_square,
+                -80 * depth,
+            )
             board.push(move)
             moves_searched += 1
 
+            gives_check = board.is_check()
+            quiet = (
+                not is_cap
+                and not gives_check
+                and not in_check
+                and move.promotion is None
+            )
+
+            if (
+                excluded_move is None
+                and is_cap
+                and not in_check
+                and not gives_check
+                and move.promotion is None
+                and beta == alpha + 1
+                and depth <= 3
+                and moves_searched > 1
+                and not (tt_move == move and singular_extension)
+                and not see_passes
+            ):
+                board.pop()
+                continue
+
+            lmp_limit = 4 + depth * depth
+            if (
+                excluded_move is None
+                and quiet
+                and beta == alpha + 1
+                and depth <= 3
+                and moves_searched - 1 >= lmp_limit
+            ):
+                board.pop()
+                continue
+
+            if (
+                excluded_move is None
+                and quiet
+                and moves_searched > 1
+                and depth <= 3
+                and static_eval + 90 * depth <= alpha
+            ):
+                board.pop()
+                continue
+
             extension = 0
-            if board.is_check() and ply < 32:
+            if gives_check and ply < 32:
                 extension = 1
             elif tt_move is not None and move == tt_move and singular_extension:
                 extension = 1
