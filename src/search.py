@@ -1,7 +1,5 @@
 import gc
-import json
 import math
-import os
 import time
 
 import numpy as np
@@ -23,6 +21,12 @@ DEFAULT_PARAMS = {
     "lmr_divisor": 2.25,
     "aspiration_delta": 35.0,
     "se_margin_mult": 2.0,
+    "razor_margin": 342.0,
+    "probcut_margin": 200.0,
+    "see_prune_margin": 80.0,
+    "lmp_base": 4.0,
+    "lmp_depth_factor": 1.0,
+    "child_futility_margin": 90.0,
 }
 
 
@@ -133,8 +137,6 @@ class Searcher:
         self,
         evaluator,
         book_path="book.bin",
-        params=None,
-        params_file="search_params.json",
         tt_size_mb=256,
     ):
         self.evaluator = evaluator
@@ -142,15 +144,6 @@ class Searcher:
         self.tt = TranspositionTable(size_mb=tt_size_mb)
 
         self.params = DEFAULT_PARAMS.copy()
-        if params is not None:
-            self.params.update(params)
-        elif os.path.exists(params_file):
-            try:
-                with open(params_file, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                    self.params.update(loaded)
-            except Exception:
-                pass
 
         self.lmr_table = build_lmr_table(
             float(self.params["lmr_base"]), float(self.params["lmr_divisor"])
@@ -405,7 +398,7 @@ class Searcher:
             and not in_check
             and depth <= 3
             and excluded_move is None
-            and static_eval + 342 * depth <= alpha
+            and static_eval + self.params["razor_margin"] * depth <= alpha
         ):
             return self.quiescence(board, alpha, beta, ply)
 
@@ -460,7 +453,8 @@ class Searcher:
             and beta < MATE_VALUE - 500
             and excluded_move is None
         ):
-            prob_beta = beta + 200
+            prob_margin = int(round(self.params["probcut_margin"]))
+            prob_beta = beta + prob_margin
             for move in board.generate_legal_captures()[:8]:
                 board.push(move)
                 qscore = -self.quiescence(
@@ -482,7 +476,7 @@ class Searcher:
                 if self.stop:
                     return 0
                 if score >= prob_beta:
-                    return score - 200
+                    return score - prob_margin
 
         singular_extension = False
         if (
@@ -551,7 +545,7 @@ class Searcher:
                 board.turn,
                 move.from_square,
                 move.to_square,
-                -80 * depth,
+                -int(round(self.params["see_prune_margin"] * depth)),
             )
             board.push(move)
             moves_searched += 1
@@ -579,7 +573,12 @@ class Searcher:
                 board.pop()
                 continue
 
-            lmp_limit = 4 + depth * depth
+            lmp_limit = int(
+                round(
+                    self.params["lmp_base"]
+                    + self.params["lmp_depth_factor"] * depth * depth
+                )
+            )
             if (
                 excluded_move is None
                 and quiet
@@ -595,7 +594,7 @@ class Searcher:
                 and quiet
                 and moves_searched > 1
                 and depth <= 3
-                and static_eval + 90 * depth <= alpha
+                and static_eval + self.params["child_futility_margin"] * depth <= alpha
             ):
                 board.pop()
                 continue

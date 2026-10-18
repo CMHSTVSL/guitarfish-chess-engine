@@ -218,8 +218,4 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-src/idk.py
-idk.py
-guitarfish_product_pooling.pth
 guitarfish.bat
-tune_spsa.py
