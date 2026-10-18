@@ -8,8 +8,8 @@ Guitarfish (6.1.45@6.4) is an open-source UCI-compliant chess engine written in 
 
 Guitarfish runs live as an official bot on Lichess: [@guitarfish-engine](https://lichess.org/@/guitarfish-engine).
 
-- **Rapid Rating:** ~2100 ELO
-- **Blitz Rating:** ~1900 ELO
+- **Rapid Rating:** ~2200 ELO
+- **Blitz Rating:** ~1980 ELO
 - **Challenge Policy:** Currently configured to accept **Blitz** and **Rapid** challenges only.
 
 > **Note:** The engine is self-hosted on a local machine. If the bot is offline or not responding, the server is likely turned off while the author is away at school =)))
@@ -34,7 +34,9 @@ The engine is named after the **guitarfish** (*Rhinobatidae*), a real family of 
   - Futility Pruning (FP)
   - Late Move Pruning (LMP)
   - Dynamic Late Move Reductions (LMR)
-  - Static Exchange Evaluation (SEE) pruning in Quiescence Search
+  - Delta pruning in Quiescence Search, guarded when a pawn can promote
+  - Lazy Static Exchange Evaluation (SEE) pruning in Quiescence Search
+  - Native noisy-move generation for captures and promotions in Quiescence Search
 - **Move Ordering:**
   - Transposition Table (TT) move
   - Good captures sorted by MVV-LVA and SEE
