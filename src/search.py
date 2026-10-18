@@ -462,9 +462,7 @@ class Searcher:
             prob_beta = beta + prob_margin
             for move in board.generate_legal_captures()[:8]:
                 board.push(move)
-                qscore = -self.quiescence(
-                    board, -prob_beta, -prob_beta + 1, ply + 1
-                )
+                qscore = -self.quiescence(board, -prob_beta, -prob_beta + 1, ply + 1)
                 score = -MATE_VALUE
                 if not self.stop and qscore >= prob_beta:
                     score = -self.negamax(

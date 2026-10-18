@@ -1339,7 +1339,9 @@ class Board:
             pseudo,
             legal,
         )
-        return [Move.from_value(int(legal[index])) for index in range(count)], has_legal_move
+        return [
+            Move.from_value(int(legal[index])) for index in range(count)
+        ], has_legal_move
 
     def generate_legal_captures(self):
         noisy_moves, _ = self.generate_legal_noisy_moves()

@@ -1,4 +1,5 @@
 import sys
+import time
 
 import src.bitboard as chess
 from src.evaluate import Evaluator
@@ -49,6 +50,7 @@ def handle_position(board, parts):
 
 def warmup(searcher):
     print("info string Warming up Numba JIT...", flush=True)
+    start = time.perf_counter()
     try:
         dummy_board = chess.Board()
         searcher.search(dummy_board, fixed_depth=4, shut_up=True)
@@ -56,7 +58,10 @@ def warmup(searcher):
         searcher.tt.clear()
         searcher.history.clear()
         searcher.counter_moves.clear()
-        print("info string Numba JIT warmup complete!", flush=True)
+        elapsed = (time.perf_counter() - start) * 1000
+        print(
+            f"info string Numba JIT warmup complete in {int(elapsed)} ms!", flush=True
+        )
     except Exception as e:
         print(f"info string Warmup failed: {e}", flush=True)
 
