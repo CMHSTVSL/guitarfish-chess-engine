@@ -260,19 +260,16 @@ class Searcher:
             if alpha < stand_pat:
                 alpha = stand_pat
 
-            if stand_pat < alpha - 900:
+            pawns = board._pieces[0 if board.turn else 6]
+            promotion_rank = 0xFF << (48 if board.turn else 8)
+            if stand_pat < alpha - 900 and not (int(pawns) & promotion_rank):
                 return alpha
             if ply >= MAX_PLY - 1 or ply >= 32:
                 return stand_pat
 
-            legal_moves = board.legal_moves
-            moves = [
-                move
-                for move in legal_moves
-                if board.is_capture(move) or move.promotion is not None
-            ]
+            moves, has_legal_move = board.generate_legal_noisy_moves()
             if not moves:
-                return 0 if not legal_moves else alpha
+                return 0 if not has_legal_move else alpha
 
         if ply >= 32:
             best_score = -MATE_VALUE
@@ -292,24 +289,32 @@ class Searcher:
 
         scored_captures = []
         for move in moves:
-            if not in_check and board.is_capture(move):
-                see_val = chess.see(pieces, board.turn, move.from_square, move.to_square)
-                if see_val < 0:
-                    continue
-            else:
-                see_val = 0
-
-            victim = mailbox[move.to_square] or 1
+            is_capture = mailbox[move.to_square] != 0 or (
+                move.to_square == board.ep_square and mailbox[move.from_square] == 1
+            )
+            victim = mailbox[move.to_square] or (1 if is_capture else 0)
             attacker = mailbox[move.from_square] or 1
             mvv_lva = PIECE_VALS[victim] * 10 - PIECE_VALS[attacker]
-            scored_captures.append((see_val * 100 + mvv_lva, move))
+            promotion_gain = (
+                PIECE_VALS[move.promotion] - PIECE_VALS[1]
+                if move.promotion is not None
+                else 0
+            )
+            scored_captures.append((mvv_lva + promotion_gain, move, is_capture))
 
         if not scored_captures:
             return alpha
 
         scored_captures.sort(key=lambda x: x[0], reverse=True)
 
-        for _, move in scored_captures:
+        for _, move, is_capture in scored_captures:
+            if not in_check and is_capture:
+                see_val = chess.see(
+                    pieces, board.turn, move.from_square, move.to_square
+                )
+                if see_val < 0:
+                    continue
+
             board.push(move)
             score = -self.quiescence(board, -beta, -alpha, ply + 1)
             board.pop()

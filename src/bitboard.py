@@ -683,6 +683,58 @@ def _generate_legal_into(pieces, white_to_move, castling, ep_square, pseudo, leg
     return legal, count
 
 
+@njit(fastmath=True)
+def _generate_legal_noisy_into(
+    pieces, white_to_move, castling, ep_square, pseudo, legal
+):
+    pseudo, pseudo_count = _generate_pseudo_into(
+        pieces, white_to_move, castling, ep_square, pseudo
+    )
+    enemy_offset = 6 if white_to_move else 0
+    own_offset = 0 if white_to_move else 6
+    enemy_occupied = np.uint64(0)
+    for index in range(6):
+        enemy_occupied |= pieces[enemy_offset + index]
+
+    own_pawns = pieces[own_offset]
+    own_king = pieces[own_offset + KING - 1]
+    count = 0
+    has_legal_move = False
+
+    for index in range(pseudo_count):
+        value = pseudo[index]
+        source = value & 63
+        target = (value >> 6) & 63
+        source_bit = np.uint64(1) << np.uint64(source)
+        target_bit = np.uint64(1) << np.uint64(target)
+        is_capture = bool(enemy_occupied & target_bit) or bool(
+            target == ep_square and own_pawns & source_bit
+        )
+        is_promotion = (value >> 12) & 7 != 0
+        is_noisy = is_capture or is_promotion
+
+        if not is_noisy and has_legal_move:
+            continue
+
+        is_castle = bool(own_king & source_bit and abs(target - source) == 2)
+        if is_castle:
+            if is_attacked(source, not white_to_move, pieces):
+                continue
+            transit = source | (((source + target) // 2) << 6)
+            if not is_legal_encoded(pieces, white_to_move, ep_square, transit):
+                continue
+
+        if not is_legal_encoded(pieces, white_to_move, ep_square, value):
+            continue
+
+        has_legal_move = True
+        if is_noisy:
+            legal[count] = value
+            count += 1
+
+    return legal, count, has_legal_move
+
+
 _SEE_PIECE_VALUES = np.array([100, 300, 300, 500, 900, 20000], dtype=np.int64)
 
 
@@ -1276,8 +1328,22 @@ class Board:
         )
         return [Move.from_value(int(legal[index])) for index in range(count)]
 
+    def generate_legal_noisy_moves(self):
+        pseudo = np.empty(256, dtype=np.int64)
+        legal = np.empty(256, dtype=np.int64)
+        _, count, has_legal_move = _generate_legal_noisy_into(
+            self._pieces,
+            self.turn,
+            self.castling_rights,
+            self.ep_square,
+            pseudo,
+            legal,
+        )
+        return [Move.from_value(int(legal[index])) for index in range(count)], has_legal_move
+
     def generate_legal_captures(self):
-        return [move for move in self.legal_moves if self.is_capture(move)]
+        noisy_moves, _ = self.generate_legal_noisy_moves()
+        return [move for move in noisy_moves if self.is_capture(move)]
 
     def is_capture(self, move):
         m_val = move._value if isinstance(move, Move) else move
