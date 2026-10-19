@@ -9,11 +9,27 @@ if __name__ == "__main__":
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
+    if len(sys.argv) > 4:
+        print(
+            "Usage: python guitarfish.py [eval_file] [book_file] [hash_mb]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    model_file = sys.argv[1] if len(sys.argv) > 1 else "guitarfish.gm"
+    book_file = sys.argv[2] if len(sys.argv) > 2 else ""
     try:
-        model_file = sys.argv[1]
-        book_file = sys.argv[2] if len(sys.argv) > 2 else ""
-        uci.uci_loop(model_file, book_file)
+        hash_size_mb = int(sys.argv[3]) if len(sys.argv) > 3 else 256
+        if not 1 <= hash_size_mb <= 1024:
+            raise ValueError
+    except ValueError:
+        print("Error: hash_mb must be an integer from 1 to 1024", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        uci.uci_loop(model_file, book_file, hash_size_mb)
     except KeyboardInterrupt:
         pass
-    except IndexError:
-        print("Usage: python guitarfish.py <model_file> <book_file>")
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)

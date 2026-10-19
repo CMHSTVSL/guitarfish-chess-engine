@@ -18,6 +18,27 @@ def parse_go(parts):
     return args
 
 
+def parse_setoption(parts):
+    try:
+        name_start = parts.index("name") + 1
+        value_start = parts.index("value", name_start)
+    except ValueError:
+        return None, None
+
+    name = " ".join(parts[name_start:value_start]).strip().lower()
+    value = " ".join(parts[value_start + 1 :])
+    return name, value
+
+
+def parse_check_option(value):
+    lowered = value.lower()
+    if lowered in ("true", "1", "yes", "on"):
+        return True
+    if lowered in ("false", "0", "no", "off"):
+        return False
+    return None
+
+
 def allocate_time(time_left, inc):
     if time_left <= 0:
         return 1.0
@@ -66,9 +87,9 @@ def warmup(searcher):
         print(f"info string Warmup failed: {e}", flush=True)
 
 
-def uci_loop(model_path="guitarfish.gm", book_path="book.bin"):
+def uci_loop(model_path="guitarfish.gm", book_path="", tt_size_mb=256):
     evaluator = Evaluator(model_path)
-    searcher = Searcher(evaluator, book_path)
+    searcher = Searcher(evaluator, book_path, tt_size_mb=tt_size_mb)
     board = chess.Board()
 
     warmup(searcher)
@@ -87,10 +108,62 @@ def uci_loop(model_path="guitarfish.gm", book_path="book.bin"):
         if cmd == "uci":
             print(f"id name Guitarfish [{desc}]")
             print(f"id author {author}")
+            print(f"option name EvalFile type string default {model_path}")
+            print(f"option name BookFile type string default {book_path}")
+            print(f"option name Hash type spin default {tt_size_mb} min 1 max 1024")
+            print("option name OwnBook type check default true")
+            print("option name SyzygyPath type string default")
+            print("option name OnlineTablebase type check default true")
             print("uciok", flush=True)
 
         elif cmd == "isready":
             print("readyok", flush=True)
+
+        elif cmd == "setoption":
+            name, value = parse_setoption(parts)
+            if name == "evalfile":
+                try:
+                    updated_evaluator = Evaluator(value)
+                except Exception as exc:
+                    print(f"info string EvalFile load failed: {exc}", flush=True)
+                else:
+                    evaluator = updated_evaluator
+                    searcher.evaluator = updated_evaluator
+                    model_path = value
+            elif name == "bookfile":
+                try:
+                    searcher.book = chess.polyglot.open_reader(value)
+                except Exception as exc:
+                    print(f"info string BookFile update failed: {exc}", flush=True)
+                else:
+                    book_path = value
+            elif name == "hash":
+                try:
+                    size_mb = int(value)
+                    if not 1 <= size_mb <= 1024:
+                        raise ValueError
+                    searcher.set_hash_size(size_mb)
+                except ValueError:
+                    print("info string Hash must be an integer from 1 to 1024", flush=True)
+                else:
+                    tt_size_mb = size_mb
+            elif name == "ownbook":
+                enabled = parse_check_option(value)
+                if enabled is None:
+                    print("info string OwnBook expects true or false", flush=True)
+                else:
+                    searcher.own_book = enabled
+            elif name == "syzygypath":
+                try:
+                    searcher.set_syzygy_path(value)
+                except Exception as exc:
+                    print(f"info string SyzygyPath update failed: {exc}", flush=True)
+            elif name == "onlinetablebase":
+                enabled = parse_check_option(value)
+                if enabled is None:
+                    print("info string OnlineTablebase expects true or false", flush=True)
+                else:
+                    searcher.online_tablebase_enabled = enabled
 
         elif cmd == "ucinewgame":
             board.reset()
@@ -136,3 +209,5 @@ def uci_loop(model_path="guitarfish.gm", book_path="book.bin"):
 
         elif cmd == "quit":
             break
+
+    searcher.close()

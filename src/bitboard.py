@@ -1232,6 +1232,8 @@ class Board:
         self._ply = 0
         self._move_stack = []
         self._hash_history = []
+        self._movegen_pseudo = np.empty(256, dtype=np.int64)
+        self._movegen_legal = np.empty(256, dtype=np.int64)
         self.reset()
         if fen:
             self.set_fen(fen)
@@ -1270,6 +1272,11 @@ class Board:
 
     @property
     def move_stack(self):
+        for index, move in enumerate(self._move_stack):
+            if move is None:
+                self._move_stack[index] = Move.from_value(
+                    int(self._state_moves[index])
+                )
         return self._move_stack
 
     def pieces(self, piece_type, color):
@@ -1316,31 +1323,30 @@ class Board:
 
     @property
     def legal_moves(self):
-        pseudo = np.empty(256, dtype=np.int64)
-        legal = np.empty(256, dtype=np.int64)
         _, count = _generate_legal_into(
             self._pieces,
             self.turn,
             self.castling_rights,
             self.ep_square,
-            pseudo,
-            legal,
+            self._movegen_pseudo,
+            self._movegen_legal,
         )
-        return [Move.from_value(int(legal[index])) for index in range(count)]
+        return [
+            Move.from_value(int(self._movegen_legal[index]))
+            for index in range(count)
+        ]
 
     def generate_legal_noisy_moves(self):
-        pseudo = np.empty(256, dtype=np.int64)
-        legal = np.empty(256, dtype=np.int64)
         _, count, has_legal_move = _generate_legal_noisy_into(
             self._pieces,
             self.turn,
             self.castling_rights,
             self.ep_square,
-            pseudo,
-            legal,
+            self._movegen_pseudo,
+            self._movegen_legal,
         )
         return [
-            Move.from_value(int(legal[index])) for index in range(count)
+            Move.from_value(int(self._movegen_legal[index])) for index in range(count)
         ], has_legal_move
 
     def generate_legal_captures(self):
@@ -1523,13 +1529,13 @@ class Board:
         if isinstance(move, int):
             m_val = move
             self.push_raw(m_val)
-            self._move_stack.append(Move.from_value(m_val))
+            self._move_stack.append(None)
         else:
             m_val = move._value
             self.push_raw(m_val)
             self._move_stack.append(move)
 
-    def pop(self):
+    def pop(self, return_move=True):
         self._ply -= 1
         ply = self._ply
         move_val = self._state_moves[ply]
@@ -1546,6 +1552,8 @@ class Board:
             self._move_stack.pop()
         self._hash_history.pop()
 
+        if not return_move:
+            return None
         return (
             Move.from_value(move_val)
             if isinstance(move_val, (int, np.integer))
@@ -1556,12 +1564,19 @@ class Board:
         return move in self.legal_moves
 
     def is_repetition(self, count):
-        current = self._hash_history[-1]
-        c = 0
-        for h in self._hash_history:
-            if h == current:
-                c += 1
-                if c >= count:
+        if count <= 1:
+            return True
+
+        history = self._hash_history
+        current = history[-1]
+        current_index = len(history) - 1
+        earliest_index = max(0, current_index - self.halfmove_clock)
+        occurrences = 0
+
+        for index in range(current_index, earliest_index - 1, -2):
+            if history[index] == current:
+                occurrences += 1
+                if occurrences >= count:
                     return True
         return False
 

@@ -104,8 +104,16 @@ cd guitarfish-chess-engine
 Launch the engine via command line:
 
 ```bash
-python guitarfish.py guitarfish.gm book.bin
+python guitarfish.py
 ```
+
+The default evaluation file is `guitarfish.gm`; the opening book is disabled by default. Optional positional arguments are the evaluation file, opening book, and transposition-table size in MiB:
+
+```bash
+python guitarfish.py guitarfish.gm book.bin 256
+```
+
+The TT size can also be changed at runtime with the UCI option `Hash` (1-1024 MiB). If the evaluation file is missing, startup reports an error.
 
 Standard UCI commands example:
 

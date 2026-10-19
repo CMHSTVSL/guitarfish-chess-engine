@@ -94,3 +94,96 @@ class OnlineTablebase:
             json.JSONDecodeError,
         ):
             return None
+
+
+class OfflineTablebase:
+    def __init__(self, path):
+        try:
+            import chess as python_chess
+            import chess.syzygy # Too lazy to implement some shit offline tablebase probing function in Numba,
+                                # so we're using python-chess's implementation :}}}
+        except ImportError as exc:
+            raise RuntimeError(
+                "Offline Syzygy requires the python-chess package"
+            ) from exc
+
+        self.chess = python_chess
+        self.tablebase = python_chess.syzygy.open_tablebase(path)
+        self.cache = {}
+
+    def probe(self, fen: str):
+        if fen in self.cache:
+            return self.cache[fen]
+
+        try:
+            board = self.chess.Board(fen)
+            if len(board.piece_map()) > 7:
+                return None
+
+            best_move = None
+            best_wdl = -3
+            best_dtz = None
+            best_rank = None
+
+            for move in board.legal_moves:
+                board.push(move)
+                try:
+                    wdl = -self.tablebase.probe_wdl(board)
+                    try:
+                        dtz = -self.tablebase.probe_dtz(board)
+                    except KeyError:
+                        dtz = None
+                finally:
+                    board.pop()
+
+                if wdl > 0:
+                    dtz_rank = -abs(dtz) if dtz is not None else 0
+                elif wdl < 0:
+                    dtz_rank = abs(dtz) if dtz is not None else 0
+                else:
+                    dtz_rank = 0
+                rank = (wdl, dtz_rank)
+
+                if best_rank is None or rank > best_rank:
+                    best_move = move
+                    best_wdl = wdl
+                    best_dtz = dtz
+                    best_rank = rank
+
+            if best_move is None:
+                return None
+
+        except (KeyError, ValueError):
+            return None
+
+        categories = {
+            2: "win",
+            1: "cursed-win",
+            0: "draw",
+            -1: "blessed-loss",
+            -2: "loss",
+        }
+        category = categories[best_wdl]
+        if category == "win":
+            score_cp = 19000 - abs(best_dtz) if best_dtz is not None else 18000
+        elif category == "loss":
+            score_cp = -19000 + abs(best_dtz) if best_dtz is not None else -18000
+        elif category == "cursed-win":
+            score_cp = 10000
+        elif category == "blessed-loss":
+            score_cp = -10000
+        else:
+            score_cp = 0
+
+        result = {
+            "best_move": best_move.uci(),
+            "category": category,
+            "dtm": None,
+            "dtz": best_dtz,
+            "score_cp": score_cp,
+        }
+        self.cache[fen] = result
+        return result
+
+    def close(self):
+        self.tablebase.close()

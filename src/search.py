@@ -5,7 +5,7 @@ import time
 import numpy as np
 
 import src.bitboard as chess
-from src.tablebase import OnlineTablebase
+from src.tablebase import OfflineTablebase, OnlineTablebase
 
 PIECE_VALS = np.array([0, 100, 300, 300, 500, 900, 20000], dtype=np.int32)
 
@@ -142,6 +142,7 @@ class Searcher:
         self.evaluator = evaluator
         self.book = chess.polyglot.open_reader(book_path)
         self.tt = TranspositionTable(size_mb=tt_size_mb)
+        self.tt_size_mb = tt_size_mb
 
         self.params = DEFAULT_PARAMS.copy()
 
@@ -167,20 +168,53 @@ class Searcher:
         self.pv_length = [0] * MAX_PLY
 
         self._mailbox = [[0] * 64 for _ in range(MAX_PLY * 2)]
+        self._mailbox_pieces = np.zeros((MAX_PLY * 2, 12), dtype=np.uint64)
 
         self.tablebase = OnlineTablebase(timeout=1.2)
+        self.syzygy_tablebase = None
+        self.online_tablebase_enabled = True
+        self.own_book = True
+
+    def set_hash_size(self, size_mb):
+        self.tt = TranspositionTable(size_mb=size_mb)
+        self.tt_size_mb = size_mb
+
+    def set_syzygy_path(self, path):
+        tablebase = OfflineTablebase(path) if path else None
+        previous = self.syzygy_tablebase
+        self.syzygy_tablebase = tablebase
+        if previous is not None:
+            previous.close()
+
+    def close(self):
+        if self.syzygy_tablebase is not None:
+            self.syzygy_tablebase.close()
+            self.syzygy_tablebase = None
 
     def _update_mailbox(self, pieces, ply):
-        mb = self._mailbox[min(ply, MAX_PLY * 2 - 1)]
-        for sq in range(64):
-            mb[sq] = 0
+        slot = min(ply, MAX_PLY * 2 - 1)
+        mb = self._mailbox[slot]
+        previous = self._mailbox_pieces[slot]
+
         for idx in range(12):
+            old_bb = int(previous[idx])
+            bb = int(pieces[idx])
+            removed = old_bb & ~bb
+            while removed:
+                sq = (removed & -removed).bit_length() - 1
+                mb[sq] = 0
+                removed &= removed - 1
+
+        for idx in range(12):
+            old_bb = int(previous[idx])
             bb = int(pieces[idx])
             p_val = (idx % 6) + 1
-            while bb:
-                sq = (bb & -bb).bit_length() - 1
+            added = bb & ~old_bb
+            while added:
+                sq = (added & -added).bit_length() - 1
                 mb[sq] = p_val
-                bb &= bb - 1
+                added &= added - 1
+            previous[idx] = bb
         return mb
 
     def score_moves_fast(self, board, moves, depth, tt_move_val, prev_move, mailbox):
@@ -250,7 +284,7 @@ class Searcher:
                         score = MATE_VALUE - (ply + 1) if board.is_check() else 0
                     else:
                         score = -self.evaluator.evaluate(board)
-                    board.pop()
+                    board.pop(return_move=False)
                     best_score = max(best_score, score)
                 return best_score
         else:
@@ -260,10 +294,12 @@ class Searcher:
             if alpha < stand_pat:
                 alpha = stand_pat
 
-            pawns = board._pieces[0 if board.turn else 6]
-            promotion_rank = 0xFF << (48 if board.turn else 8)
-            if stand_pat < alpha - 900 and not (int(pawns) & promotion_rank):
-                return alpha
+            # TEMP: legacy 900-cp delta pruning is disabled during this comparison.
+            # pawns = board._pieces[0 if board.turn else 6]
+            # promotion_rank = 0xFF << (48 if board.turn else 8)
+            # if stand_pat < alpha - 900 and not (int(pawns) & promotion_rank):
+            #     return alpha
+
             if ply >= MAX_PLY - 1 or ply >= 32:
                 return stand_pat
 
@@ -280,7 +316,7 @@ class Searcher:
                     score = MATE_VALUE - (ply + 1) if board.is_check() else 0
                 else:
                     score = -self.evaluator.evaluate(board)
-                board.pop()
+                board.pop(return_move=False)
                 best_score = max(best_score, score)
             return best_score
 
@@ -300,14 +336,23 @@ class Searcher:
                 if move.promotion is not None
                 else 0
             )
-            scored_captures.append((mvv_lva + promotion_gain, move, is_capture))
+            capture_gain = (PIECE_VALS[victim] if is_capture else 0) + promotion_gain
+            scored_captures.append(
+                (mvv_lva + promotion_gain, move, is_capture, int(capture_gain))
+            )
 
         if not scored_captures:
             return alpha
 
+        if (
+            not in_check
+            and stand_pat + max(item[3] for item in scored_captures) + 100 < alpha
+        ):
+            return alpha
+
         scored_captures.sort(key=lambda x: x[0], reverse=True)
 
-        for _, move, is_capture in scored_captures:
+        for _, move, is_capture, _ in scored_captures:
             if not in_check and is_capture:
                 see_val = chess.see(
                     pieces, board.turn, move.from_square, move.to_square
@@ -317,7 +362,7 @@ class Searcher:
 
             board.push(move)
             score = -self.quiescence(board, -beta, -alpha, ply + 1)
-            board.pop()
+            board.pop(return_move=False)
 
             if self.stop:
                 return 0
@@ -444,7 +489,7 @@ class Searcher:
                     None,
                     None,
                 )
-                board.pop()
+                board.pop(return_move=False)
 
                 if self.stop:
                     return 0
@@ -475,7 +520,7 @@ class Searcher:
                         move,
                         None,
                     )
-                board.pop()
+                board.pop(return_move=False)
                 if self.stop:
                     return 0
                 if score >= prob_beta:
@@ -573,7 +618,7 @@ class Searcher:
                 and not (tt_move == move and singular_extension)
                 and not see_passes
             ):
-                board.pop()
+                board.pop(return_move=False)
                 continue
 
             lmp_limit = int(
@@ -589,7 +634,7 @@ class Searcher:
                 and depth <= 3
                 and moves_searched - 1 >= lmp_limit
             ):
-                board.pop()
+                board.pop(return_move=False)
                 continue
 
             if (
@@ -599,7 +644,7 @@ class Searcher:
                 and depth <= 3
                 and static_eval + self.params["child_futility_margin"] * depth <= alpha
             ):
-                board.pop()
+                board.pop(return_move=False)
                 continue
 
             extension = 0
@@ -645,7 +690,7 @@ class Searcher:
                         board, new_depth, -beta, -alpha, ply + 1, True, move, None
                     )
 
-            board.pop()
+            board.pop(return_move=False)
 
             if self.stop:
                 return 0
@@ -768,7 +813,7 @@ class Searcher:
     def search(
         self, board, time_limit=5.0, fixed_depth=None, silent=False, shut_up=False
     ):
-        if not fixed_depth or fixed_depth > 1 and not shut_up:
+        if self.own_book and (not fixed_depth or fixed_depth > 1 and not shut_up):
             book_move = self.book.probe(board)
             if book_move:
                 if not silent:
@@ -800,7 +845,11 @@ class Searcher:
 
         if board.piece_count() <= 7 and self.hard_time_limit > 1.5:
             fen_str = self._get_fen_from_board(board)
-            tb = self.tablebase.probe(fen_str)
+            tb = None
+            if self.syzygy_tablebase is not None:
+                tb = self.syzygy_tablebase.probe(fen_str)
+            if tb is None and self.online_tablebase_enabled:
+                tb = self.tablebase.probe(fen_str)
             if tb and tb["best_move"]:
                 best_m = tb["best_move"]
                 score_str = f"cp {tb['score_cp']}"
