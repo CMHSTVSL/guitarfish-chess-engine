@@ -95,7 +95,7 @@ def uci_loop(model_path="guitarfish.gm", book_path="", tt_size_mb=256):
     warmup(searcher)
 
     author = evaluator.metadata.get("author", "MemeViber")
-    desc = evaluator.metadata.get("description", "6.1.45@6.4")
+    desc = evaluator.metadata.get("description", "6.4.54@6.5")
 
     for raw_line in sys.stdin:
         line = raw_line.strip()
@@ -144,7 +144,9 @@ def uci_loop(model_path="guitarfish.gm", book_path="", tt_size_mb=256):
                         raise ValueError
                     searcher.set_hash_size(size_mb)
                 except ValueError:
-                    print("info string Hash must be an integer from 1 to 1024", flush=True)
+                    print(
+                        "info string Hash must be an integer from 1 to 1024", flush=True
+                    )
                 else:
                     tt_size_mb = size_mb
             elif name == "ownbook":
@@ -161,7 +163,9 @@ def uci_loop(model_path="guitarfish.gm", book_path="", tt_size_mb=256):
             elif name == "onlinetablebase":
                 enabled = parse_check_option(value)
                 if enabled is None:
-                    print("info string OnlineTablebase expects true or false", flush=True)
+                    print(
+                        "info string OnlineTablebase expects true or false", flush=True
+                    )
                 else:
                     searcher.online_tablebase_enabled = enabled
 

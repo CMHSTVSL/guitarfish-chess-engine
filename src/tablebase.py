@@ -100,8 +100,8 @@ class OfflineTablebase:
     def __init__(self, path):
         try:
             import chess as python_chess
-            import chess.syzygy # Too lazy to implement some shit offline tablebase probing function in Numba,
-                                # so we're using python-chess's implementation :}}}
+            import chess.syzygy  # Too lazy to implement some shit offline tablebase probing function in Numba,
+        # so we're using python-chess's implementation :}}}
         except ImportError as exc:
             raise RuntimeError(
                 "Offline Syzygy requires the python-chess package"

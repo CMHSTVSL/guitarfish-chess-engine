@@ -1,6 +1,6 @@
 <img src="logo.jpg" alt="Shovelnose Guitarfish" width="460" height="285"/>
 
-Guitarfish (6.1.45@6.4) is an open-source UCI-compliant chess engine written in Python, featuring a custom 64-bit bitboard move generator accelerated by Numba JIT and an evaluation function powered by a neural network (Custom NNUE).
+Guitarfish (6.4.54@6.5) is an open-source UCI-compliant chess engine written in Python, featuring a custom 64-bit bitboard move generator accelerated by Numba JIT and an evaluation function powered by a neural network (Custom NNUE).
 
 ---
 
@@ -25,7 +25,7 @@ The engine is named after the **guitarfish** (*Rhinobatidae*), a real family of 
 ## Features
 
 - **Engine Core:** Custom 64-bit bitboard implementation compiled to native machine code using Numba JIT.
-- **Evaluation:** Custom NNUE architecture with 1,729 board features (Piece-Square tables, Combat Maps, King Safety zones, and Pawn Phalanxes/Chains), quantized to INT8 for CPU inference.
+- **Evaluation:** King-bucketed NNUE with 7,105 input feature IDs, dual 1,024-value accumulators, product pooling, and a single centipawn output head.
 - **Search Algorithm:** Negamax with Principal Variation Search (PVS) and Alpha-Beta pruning.
 - **Pruning & Reductions:**
   - Singular Extensions (SE)
@@ -56,12 +56,17 @@ The engine is named after the **guitarfish** (*Rhinobatidae*), a real family of 
 
 | Component | Specification |
 | :--- | :--- |
-| **Input Features** | 1,729 sparse geometric features ($\le 256$ active per position) |
-| **Feature Transformer** | Dual accumulator ($2 \times 1024$), shared perspective weights |
-| **Hidden Layers** | $\text{Linear}(1024 \to 64) \to \text{Dual Expansion}(64 \to 128) \to \text{Linear}(128 \to 32)$ |
-| **Activation** | **Dual Activation** ($\text{clamp}(x) \parallel \text{clamp}(x)^2$) on L1; **SCReLU** on L2 |
-| **Output** | $\text{Linear}(32 \to 1)$ mapped to centipawns via WDL scaling ($S = 410.0$) |
-| **Loss Function** | **Dual Loss:** $0.75 \times \text{BCE}(\text{WDL}) + 0.25 \times \text{Huber}(\text{Centipawns})$ |
+| **Raw Features** | 1,729 sparse features: 768 piece-square features plus 961 combat, king-safety, and pawn-structure features |
+| **King Buckets** | 8 buckets (4 rank bands × 2 mirrored file groups); piece-square features expand to 6,144 bucketed IDs |
+| **Embedding Input** | 7,105 active feature IDs (6,144 bucketed piece-square + 961 auxiliary); padding ID 7,105; at most 256 active IDs per side |
+| **Feature Transformer** | Shared embedding weights and bias; separate side-to-move/opponent accumulators ($2 \times 1024$) |
+| **Pooling** | Clamp accumulators to $[0,1]$, product-pool each 1,024-value accumulator into 512 values, then concatenate to 1,024 |
+| **Hidden Layers** | $\text{Linear}(1024 \to 64) \to [c, c^2] \ (64 \to 128) \to \text{Linear}(128 \to 32)$ |
+| **Activation** | **Dual activation** ($c \parallel c^2$) after FC1; **SCReLU** ($\text{clamp}(x,0,1)^2$) after FC2 |
+| **Output** | Single head, $\text{Linear}(32 \to 1)$, scaled to centipawns by $410.0$ |
+| **Training Loss** | $0.80 \times \text{BCE} (\text{WDL}) + 0.20 \times \text{Huber} (\text{normalized CP}, \delta=0.25)$ |
+
+The 8-way king bucket is selected independently for each perspective from that side's king square. The training dataset can use the original 1,729-feature binary data and applies the bucket offset while loading samples.
 
 
 ### 2. Move Generation Benchmark

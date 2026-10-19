@@ -294,12 +294,6 @@ class Searcher:
             if alpha < stand_pat:
                 alpha = stand_pat
 
-            # TEMP: legacy 900-cp delta pruning is disabled during this comparison.
-            # pawns = board._pieces[0 if board.turn else 6]
-            # promotion_rank = 0xFF << (48 if board.turn else 8)
-            # if stand_pat < alpha - 900 and not (int(pawns) & promotion_rank):
-            #     return alpha
-
             if ply >= MAX_PLY - 1 or ply >= 32:
                 return stand_pat
 

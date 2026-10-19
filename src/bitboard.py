@@ -102,8 +102,8 @@ _DEBRUIJN_INDEX = np.array(
 _PIECE_ZOBRIST = np.zeros((12, 64), dtype=np.uint64)
 for pt in range(6):
     for sq in range(64):
-        _PIECE_ZOBRIST[pt, sq] = POLYGLOT_KEYS[(pt * 2 + 1) * 64 + sq]  # White
-        _PIECE_ZOBRIST[pt + 6, sq] = POLYGLOT_KEYS[(pt * 2) * 64 + sq]  # Black
+        _PIECE_ZOBRIST[pt, sq] = POLYGLOT_KEYS[(pt * 2 + 1) * 64 + sq]
+        _PIECE_ZOBRIST[pt + 6, sq] = POLYGLOT_KEYS[(pt * 2) * 64 + sq]
 
 
 @njit(inline="always", fastmath=True)
@@ -1274,9 +1274,7 @@ class Board:
     def move_stack(self):
         for index, move in enumerate(self._move_stack):
             if move is None:
-                self._move_stack[index] = Move.from_value(
-                    int(self._state_moves[index])
-                )
+                self._move_stack[index] = Move.from_value(int(self._state_moves[index]))
         return self._move_stack
 
     def pieces(self, piece_type, color):
@@ -1332,8 +1330,7 @@ class Board:
             self._movegen_legal,
         )
         return [
-            Move.from_value(int(self._movegen_legal[index]))
-            for index in range(count)
+            Move.from_value(int(self._movegen_legal[index])) for index in range(count)
         ]
 
     def generate_legal_noisy_moves(self):
@@ -1442,7 +1439,7 @@ class Board:
             self._hash ^= _PIECE_ZOBRIST[captured_idx, to_sq]
         elif moving_pt == PAWN and to_sq == self.ep_square:
             cap_sq = to_sq - 8 if self.turn else to_sq + 8
-            ep_pawn_idx = enemy_offset  # Tốt địch
+            ep_pawn_idx = enemy_offset
             self._pieces[ep_pawn_idx] &= ~(np.uint64(1) << np.uint64(cap_sq))
             self._hash ^= _PIECE_ZOBRIST[ep_pawn_idx, cap_sq]
             self._state_captured_pt[ply] = ep_pawn_idx
