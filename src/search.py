@@ -606,6 +606,7 @@ class Searcher:
             board, legal_moves, depth, tt_move_val, prev_move, mailbox
         )
 
+        cm_val = self.counter_moves.get_move(prev_move)
         best_score = -MATE_VALUE
         best_move_found = None
         moves_searched = 0
@@ -616,6 +617,7 @@ class Searcher:
             if excluded_move is not None and move == excluded_move:
                 continue
 
+            m_val = move._value
             is_cap = (mailbox[move.to_square] != 0) or (
                 move.to_square == board.ep_square
             )
